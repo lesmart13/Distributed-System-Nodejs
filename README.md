@@ -16,7 +16,7 @@
             C. cd://Distributed-System-Nodejs>v-1.0.0>s03>node server.js 3002
       
       _____________________
-      Setup 3: Start server 
+      Setup 3: Start frontend server 
 
       A. Head over to npx-http-server directory and open in command prommpt and run - npx http-server -p 5000
       Note: You can choose another port if port 5000 is used by some other application.
