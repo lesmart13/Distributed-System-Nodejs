@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Message System</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .form-group { margin-bottom: 15px; }
+        textarea, input, button { width: 100%; padding: 8px; margin-top: 5px; }
+        #response { margin-top: 20px; padding: 10px; border: 1px solid #ccc; min-height: 100px; }
+        .attachment { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Distributed Message System</h1>
+    
+    <form id="messageForm" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="message">Message:</label>
+            <textarea id="message" name="content" rows="4" placeholder="Enter your message"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="file">Attach File:</label>
+            <input type="file" id="file" name="file">
+        </div>
+
+        <button type="submit">Send Message</button>
+    </form>
+    <button onclick="fetchMessages()">Refresh Messages</button>
+
+    <div id="response"></div>
+
+    <script>
+        const SERVERS = [
+            'http://localhost:3000',
+            'http://localhost:3001',
+            'http://localhost:3002'
+        ];
+
+        document.getElementById('messageForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const responseDiv = document.getElementById('response');
+            const content = document.getElementById('message').value;
+            const fileInput = document.getElementById('file');
+
+            if (!content.trim()) {
+                responseDiv.innerHTML = 'Please enter a message';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('content', content);
+            if (fileInput.files[0]) {
+                formData.append('file', fileInput.files[0]);
+            }
+
+            responseDiv.innerHTML = 'Sending...';
+            let attempts = 0;
+            let lastRedirect = null;
+
+            while (attempts < SERVERS.length) {
+                const server = SERVERS[attempts % SERVERS.length];
+                try {
+                    const response = await fetch(`${server}/message`, {
+                        method: 'POST',
+                        body: formData,
+                        redirect: 'manual'
+                    });
+
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        responseDiv.innerHTML = `Success: Message sent via ${server}`;
+                        document.getElementById('message').value = '';
+                        fileInput.value = '';
+                        fetchMessages();
+                        return;
+                    } else if (response.status === 307 && result.redirect) {
+                        lastRedirect = result.redirect;
+                        attempts++;
+                        responseDiv.innerHTML = `Redirecting to ${lastRedirect}...`;
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        continue;
+                    } else {
+                        throw new Error(result.error || `HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    if (lastRedirect) {
+                        attempts++;
+                        responseDiv.innerHTML = `Trying ${lastRedirect}...`;
+                        await tryRedirect(lastRedirect, formData, responseDiv);
+                        return;
+                    }
+                    responseDiv.innerHTML = `Error: ${error.message}`;
+                    return;
+                }
+            }
+            responseDiv.innerHTML = 'Error: Could not find leader after all attempts';
+        });
+
+        async function tryRedirect(url, formData, responseDiv) {
+            try {
+                const response = await fetch(`${url}/message`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                
+                if (response.ok) {
+                    responseDiv.innerHTML = `Success: Message sent via ${url}`;
+                    document.getElementById('message').value = '';
+                    document.getElementById('file').value = '';
+                    fetchMessages();
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                responseDiv.innerHTML = `Error with redirect: ${error.message}`;
+            }
+        }
+
+        async function fetchMessages() {
+            const responseDiv = document.getElementById('response');
+            responseDiv.innerHTML = '<h3>Messages Across Servers:</h3>';
+            
+            for (const server of SERVERS) {
+                try {
+                    const response = await fetch(`${server}/messages`);
+                    const data = await response.json();
+                    
+                    responseDiv.innerHTML += `
+                        <div>
+                            Server ${data.port} (${data.isLeader ? 'Leader' : 'Follower'}):
+                            ${data.messages.map(m => `
+                                <br>${m.id}: ${m.content} (${m.timestamp})
+                                ${m.file ? `<div class="attachment">Attachment: <a href="data:${m.file.mimeType};base64,${m.file.data}" download="${m.file.name}">${m.file.name}</a></div>` : ''}
+                            `).join('') || ' No messages'}
+                        </div><br>`;
+                } catch (error) {
+                    responseDiv.innerHTML += `Error fetching from ${server}: ${error.message}<br>`;
+                }
+            }
+        }
+
+        fetchMessages();
+        setInterval(fetchMessages, 5000);
+    </script>
+</body>
+</html>
